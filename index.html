@@ -325,7 +325,7 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       Open Sheet
     </button>
-    <button class="upload-btn" style="background:rgba(245,158,11,0.15);border:1.5px solid #f59e0b;color:#fcd34d;" onclick="window.open('https://docs.google.com/spreadsheets/d/1-EPRxYfMYtybzRsBwQjXx8cYD82l0tncUfo8oaofj54/edit?usp=drive_link','_blank')">
+    <button class="upload-btn" style="background:rgba(245,158,11,0.15);border:1.5px solid #f59e0b;color:#fcd34d;" onclick="window.open('https://docs.google.com/spreadsheets/d/1fBBn_DqD81o3zA8jQ5ZS3Fm96ym-oyagPAWqm-t12Bc/edit?gid=695003852#gid=695003852','_blank')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
       Consultant Drawing List
     </button>
@@ -437,7 +437,7 @@
     </div>
     <div class="chart-card">
       <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;">GFC Dwg. Received from Consultant</div>
-      <div class="chart-subtitle">Register Dwg. No. tallied vs Consultant Master List</div>
+      <div class="chart-subtitle">Register GFC copies only, tallied vs Consultant Drawing List</div>
       <div id="gfcRcvCard" style="margin-top:10px;"></div>
     </div>
     </div>
@@ -470,10 +470,17 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const SCRIPT_URL='https://script.google.com/macros/s/AKfycbx5FTrwTdK-HlyBT-1zU9AXWEYhum2gCwmRFnAvGIY58ZPih31YUrUygFLuC6ByfGHN/exec';
-const MASTER_LIST_URL='https://docs.google.com/spreadsheets/d/1-EPRxYfMYtybzRsBwQjXx8cYD82l0tncUfo8oaofj54/gviz/tq?gid=1130653507&tqx=responseHandler:masterListCallback';
+const MASTER_CFG={
+  url:'https://docs.google.com/spreadsheets/d/1fBBn_DqD81o3zA8jQ5ZS3Fm96ym-oyagPAWqm-t12Bc/gviz/tq?gid=695003852&tqx=responseHandler:masterListCallback',
+  slCol:0,
+  dwgCol:1,
+  descCol:2
+};
 const AUTO_REFRESH=5;
-let masterDwgSet=null;
-let masterTotalCount=0;
+let masterItems=null;
+function normDwg(s){
+  return String(s||'').toUpperCase().replace(/\b(BASEMENT|GROUND)\b/g,'').replace(/[^A-Z0-9]/g,'');
+}
 let masterListFailed=false;
 let masterListReqId=0;
 let allDrawings=[],catFilter='All',statusFilter='All',revFilter='All',areaFilter='All',searchQuery='';
@@ -485,50 +492,45 @@ function loadMasterList(){
   const myReq=++masterListReqId;
   const oldScript=document.getElementById('masterListScript');
   if(oldScript) oldScript.remove();
+  let masterListTimer;
   window.masterListCallback=function(json){
     if(myReq!==masterListReqId) return;
     clearTimeout(masterListTimer);
     try{
       const rows=(json&&json.table&&json.table.rows)||[];
-      const set=new Set();
-      let rowCount=0;
+      const items=[];
       rows.forEach(r=>{
-        const slCell=r.c&&r.c[0];
-        const descCell=r.c&&r.c[1];
-        const slVal=(slCell&&slCell.v!=null)?String(slCell.v).trim():'';
-        const descVal=(descCell&&descCell.v!=null)?String(descCell.v).trim():'';
-        if(!slVal&&!descVal) return;
-        rowCount++;
-        const dwgCell=r.c&&r.c[2];
-        const dwgVal=(dwgCell&&dwgCell.v!=null)?String(dwgCell.v).trim():'';
-        if(dwgVal) set.add(dwgVal.toUpperCase());
+        const c=r.c||[];
+        const val=i=>(c[i]&&c[i].v!=null)?String(c[i].v).trim():'';
+        const sl=val(MASTER_CFG.slCol), dwg=val(MASTER_CFG.dwgCol);
+        if(!/^\d+$/.test(sl)||!dwg) return;
+        items.push({sl:parseInt(sl,10),dwg:dwg,desc:val(MASTER_CFG.descCol),key:normDwg(dwg)});
       });
-      masterDwgSet=set;
-      masterTotalCount=rowCount;
+      if(!items.length) throw new Error('empty master list');
+      masterItems=items;
       masterListFailed=false;
     }catch(e){
       console.error('Master list parse failed',e);
-      masterDwgSet=null;
-      masterTotalCount=0;
+      masterItems=null;
       masterListFailed=true;
     }
     applyFilters();
   };
   const script=document.createElement('script');
   script.id='masterListScript';
-  script.src=MASTER_LIST_URL+'&t='+Date.now();
+  script.src=MASTER_CFG.url+'&t='+Date.now();
   script.onerror=function(){
     if(myReq!==masterListReqId) return;
     clearTimeout(masterListTimer);
     console.error('Master list script load failed');
-    masterDwgSet=null;
+    masterItems=null;
     masterListFailed=true;
     applyFilters();
   };
   document.body.appendChild(script);
-  const masterListTimer=setTimeout(()=>{
+  masterListTimer=setTimeout(()=>{
     if(myReq!==masterListReqId) return;
-    if(!masterDwgSet){
+    if(!masterItems){
       console.error('Master list load timed out');
       masterListFailed=true;
       applyFilters();
@@ -707,14 +709,19 @@ function renderGfcRcv(data){
     el.innerHTML='<div style="text-align:center;color:#f87171;font-size:11px;padding:20px 10px;">⚠️ Could not load Consultant Master List. Check sharing/link.</div>';
     return;
   }
-  if(!masterDwgSet){
+  if(!masterItems){
     el.innerHTML='<div style="text-align:center;color:#37474f;font-size:11px;padding:20px 0;">⏳ Loading consultant master list...</div>';
     return;
   }
-  const registerSet=new Set(data.map(d=>(d.dwgno||'').trim().toUpperCase()).filter(Boolean));
-  const total=masterTotalCount;
-  const matched=[...masterDwgSet].filter(no=>registerSet.has(no)).length;
-  const missing=total-matched;
+  const gfcData=data.filter(d=>d.cat==='GFC');
+  const regKeys=new Set(gfcData.map(d=>normDwg(d.dwgno)).filter(k=>k&&k!=='NA'));
+  const masterKeys=new Set(masterItems.map(m=>m.key));
+  const pendingItems=masterItems.filter(m=>!regKeys.has(m.key));
+  const total=masterItems.length;
+  const missing=pendingItems.length;
+  const matched=total-missing;
+  const unknown=gfcData.filter(d=>{const k=normDwg(d.dwgno);return k&&k!=='NA'&&!masterKeys.has(k);});
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const pct=total>0?Math.round(matched/total*100):0;
   const circ=2*Math.PI*40;
   const dash=circ*pct/100;
@@ -748,7 +755,14 @@ function renderGfcRcv(data){
       <span style="font-size:9px;color:#78909c;">0%</span>
       <span style="font-size:9px;color:${barColor};font-weight:600;">${matched} of ${total} — ${pct}% received vs Master List</span>
       <span style="font-size:9px;color:#78909c;">100%</span>
-    </div>`;
+    </div>
+    ${unknown.length?`<div style="margin-top:8px;font-size:10.5px;color:#b45309;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px 8px;">⚠️ ${unknown.length} register entr${unknown.length>1?'ies':'y'} not found in Drawing List — check spelling:<br>${unknown.slice(0,8).map(d=>'SL '+d.sl+': '+esc(d.dwgno)).join('<br>')}${unknown.length>8?'<br>…':''}</div>`:''}
+    <details style="margin-top:8px;">
+      <summary style="cursor:pointer;font-size:10.5px;font-weight:600;color:#37474f;">Pending list (${missing})</summary>
+      <div style="max-height:150px;overflow:auto;font-size:10.5px;line-height:1.5;margin-top:4px;color:#37474f;">
+        ${pendingItems.map(m=>m.sl+'. '+esc(m.dwg)+' — '+esc(m.desc)).join('<br>')||'All received ✅'}
+      </div>
+    </details>`;
 }
 function toggleExportMenu(){
   const m=document.getElementById('exportMenu');
@@ -776,9 +790,9 @@ function exportExcel(){
   const gfc=data.filter(d=>d.cat==='GFC').length;
   const upd=data.filter(d=>d.status==='Updated').length;
   const vd=data.filter(d=>d.status==='Void').length;
-  const registerSet=new Set(data.map(d=>(d.dwgno||'').trim().toUpperCase()).filter(Boolean));
-  const masterTotal=masterTotalCount||0;
-  const gfcRcv=masterDwgSet?[...masterDwgSet].filter(no=>registerSet.has(no)).length:0;
+  const registerSet=new Set(data.filter(d=>d.cat==='GFC').map(d=>normDwg(d.dwgno)).filter(k=>k&&k!=='NA'));
+  const masterTotal=masterItems?masterItems.length:0;
+  const gfcRcv=masterItems?masterItems.filter(m=>registerSet.has(m.key)).length:0;
   const soft=data.filter(d=>d.soft).length;
   const now=new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
 
